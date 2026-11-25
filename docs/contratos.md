@@ -1,6 +1,6 @@
 # Contratos del lenguaje CommandFlow
 
-**Versión:** 1.0 (borrador para aprobación) · **Tarjeta:** TK-03
+**Versión:** 1.1 (borrador para aprobación) · **Tarjeta:** TK-03
 
 Este documento fija los formatos de datos que se intercambian entre los módulos del sistema. Una vez aprobado, **cualquier cambio requiere un Pull Request que lo modifique y la aprobación del equipo**, para que lexer, parser, semántico, generador de IR, ejecutor, API y frontend no se desincronicen.
 
@@ -14,7 +14,7 @@ Texto → Lexer → Tokens → Parser → AST → Semántico → Instrucciones s
 - Los **códigos de operación del IR** y las **rutas de la API** van en inglés (`SET_STATE`, `/api/execute`), como pide el enunciado.
 - `linea` y `columna` empiezan en **1**.
 - Codificación: UTF-8.
-- **Estados internos:** todo dispositivo guarda su estado como `"ON"` u `"OFF"`. Lo que ve el usuario (`ENCENDIDO`, `APAGADO`, `ACTIVADA`, `DESACTIVADA`) es solo una etiqueta según el tipo de dispositivo (sección 3).
+- **Estados internos:** todo dispositivo guarda su estado como `"ON"` u `"OFF"`. Lo que ve el usuario (`ENCENDIDO`, `APAGADO`, `ACTIVADA`, `DESACTIVADA`) es solo una etiqueta según el tipo de dispositivo (sección 1).
 
 ## 1. Catálogo de comandos
 
@@ -34,7 +34,7 @@ Reglas del programa:
 
 - Un programa son una o más instrucciones separadas por salto de línea. Las líneas en blanco se ignoran.
 - Dentro de `ENTONCES` solo se permite un comando simple (no otro `SI`).
-- `REPETIR` es **opcional** y queda fuera de la versión 1.0 de este contrato. Si el equipo lo implementa, se agrega como versión 1.1.
+- `REPETIR` es **opcional** y queda fuera de la versión 1.x de este contrato. Si el equipo lo implementa, se agrega como versión 1.2.
 
 ### Dispositivos iniciales (tabla de símbolos)
 
@@ -63,7 +63,11 @@ Etiquetas por tipo: LED y VENTILADOR usan `ON → ENCENDIDO` y `OFF → APAGADO`
 
 ### Tipos de token
 
-`ENCENDER`, `APAGAR`, `ACTIVAR`, `DESACTIVAR`, `CONSULTAR`, `LISTAR`, `DISPOSITIVOS`, `NOTIFICAR`, `ENVIAR`, `CORREO`, `A`, `MENSAJE`, `SI`, `ENTONCES` (cada palabra reservada es su propio tipo), más `ESTADO`, `IDENTIFICADOR`, `CADENA`, `OP_IGUAL`, `OP_DIFERENTE`, `SALTO_LINEA`, `EOF`.
+Los comandos llevan el prefijo `COMANDO_` para coincidir con la figura del enunciado: `COMANDO_ENCENDER`, `COMANDO_APAGAR`, `COMANDO_ACTIVAR`, `COMANDO_DESACTIVAR`, `COMANDO_CONSULTAR`, `COMANDO_LISTAR`, `COMANDO_NOTIFICAR`, `COMANDO_ENVIAR`.
+
+El resto de palabras reservadas es su propio tipo: `DISPOSITIVOS`, `CORREO`, `A`, `MENSAJE`, `SI`, `ENTONCES`.
+
+Además: `ESTADO`, `IDENTIFICADOR`, `CADENA`, `OP_IGUAL`, `OP_DIFERENTE`, `SALTO_LINEA`, `EOF`.
 
 ### Formato
 
@@ -78,14 +82,14 @@ Etiquetas por tipo: LED y VENTILADOR usan `ON → ENCENDIDO` y `OFF → APAGADO`
 ```
 
 - `lexema`: texto exacto tal como lo escribió el usuario.
-- `valor`: palabras reservadas y estados en **MAYÚSCULAS**; cadenas **sin comillas**; el resto igual al lexema; `null` en `SALTO_LINEA` y `EOF`.
+- `valor`: palabras reservadas y estados en **MAYÚSCULAS** (en los comandos, el nombre sin prefijo: `"ENCENDER"`); cadenas **sin comillas**; el resto igual al lexema; `null` en `SALTO_LINEA` y `EOF`.
 - La lista de tokens siempre termina con un token `EOF`.
 
 **Ejemplo** para `ENCENDER led1`:
 
 ```json
 [
-  { "tipo": "ENCENDER", "lexema": "ENCENDER", "valor": "ENCENDER", "linea": 1, "columna": 1 },
+  { "tipo": "COMANDO_ENCENDER", "lexema": "ENCENDER", "valor": "ENCENDER", "linea": 1, "columna": 1 },
   { "tipo": "IDENTIFICADOR", "lexema": "led1", "valor": "led1", "linea": 1, "columna": 10 },
   { "tipo": "EOF", "lexema": "", "valor": null, "linea": 1, "columna": 14 }
 ]
@@ -171,6 +175,8 @@ Salida: `{ "instrucciones": [ ... ] }`.
 | `SEM_ESTADO_INCOMPATIBLE` | El estado de la condición no corresponde al tipo | `SI led1 == ACTIVADA ENTONCES ...` |
 | `SEM_CORREO_INVALIDO` | El destinatario no tiene formato de correo | `ENVIAR CORREO A "hola" MENSAJE "x"` |
 
+En un `SI`, el análisis semántico valida **la condición y también el comando de `ENTONCES`**. Por ejemplo, `SI led1 == ENCENDIDO ENTONCES ENCENDER alarma1` produce `SEM_OPERACION_INCOMPATIBLE`.
+
 ## 5. Contrato del IR (código intermedio)
 
 El IR es una **lista plana** de instrucciones numeradas.
@@ -207,7 +213,7 @@ El IR es una **lista plana** de instrucciones numeradas.
 ### Reglas para el optimizador
 
 - Después de eliminar instrucciones, se **renumeran** los `idx` y se **actualizan** los `target` de los saltos.
-- Las optimizaciones solo se aplican a tramos de instrucciones **sin saltos** entre ellas.
+- Las optimizaciones solo se aplican a tramos de instrucciones **sin saltos** entre ellas, y **ninguna optimización cruza una instrucción que sea destino de un salto** (un `target` de `JUMP_IF_FALSE`).
 - `SEND_EMAIL` y `NOTIFY` **nunca** se eliminan ni se reordenan.
 - No se elimina un `SET_STATE` si hay un `GET_STATE` del mismo dispositivo entre él y la siguiente asignación.
 - El optimizador devuelve además la lista de reglas aplicadas (ver sección 6).
@@ -222,6 +228,8 @@ Base: `/api`. Formato: JSON.
 | `POST /api/execute` | Valida, genera IR, optimiza y ejecuta |
 | `GET /api/devices` | Lista los dispositivos y sus estados |
 | `GET /api/history` | Historial de instrucciones ejecutadas |
+
+`GET /api/devices` devuelve `{ "dispositivos": [ ... ] }`.
 
 ### Dispositivo
 
@@ -273,6 +281,7 @@ Base: `/api`. Formato: JSON.
 - `datos` es `null` en las instrucciones de control. En `CONSULTAR` trae `{ "dispositivo": { ... } }`; en `LISTAR`, `{ "dispositivos": [ ... ] }`.
 - `dispositivos` siempre trae el estado **final** de todos los dispositivos, para refrescar el panel del frontend.
 - `/api/analyze` devuelve la misma estructura, pero con `resultados` en `[]` y sin modificar ningún estado.
+- **Condición no cumplida:** si el `SI` no se cumple, esa instrucción devuelve `exito: true`, `datos: null` y `mensaje: "Condición no cumplida, no se ejecutó la acción"`.
 
 ### Respuesta con error
 
@@ -296,6 +305,15 @@ Base: `/api`. Formato: JSON.
 }
 ```
 
+**Fases parciales.** Las fases que sí terminaron se devuelven llenas y las demás en `null`, para que el panel muestre hasta dónde llegó el análisis:
+
+| `error.fase` | `tokens` | `ast` | `ir` / `ir_optimizado` |
+|---|---|---|---|
+| `LEXICO` | `null` | `null` | `null` |
+| `SINTACTICO` | lleno | `null` | `null` |
+| `SEMANTICO` | lleno | lleno | `null` |
+| `EJECUCION` | lleno | lleno | lleno |
+
 ### Catálogo de errores
 
 | `fase` | `codigo` | Ejemplo |
@@ -303,12 +321,31 @@ Base: `/api`. Formato: JSON.
 | `LEXICO` | `LEX_CARACTER_INVALIDO` | `ENCENDER led1@` |
 | `LEXICO` | `LEX_CADENA_SIN_CERRAR` | `NOTIFICAR "hola` |
 | `SINTACTICO` | `SYN_ESPERADO_IDENTIFICADOR` | `ENCENDER` |
+| `SINTACTICO` | `SYN_ESPERADO_ESTADO` | `SI led1 ==` |
+| `SINTACTICO` | `SYN_ESPERADO_CADENA` | `NOTIFICAR` |
 | `SINTACTICO` | `SYN_TOKEN_INESPERADO` | `ENCENDER led1 led2` |
 | `SEMANTICO` | `SEM_DISPOSITIVO_NO_EXISTE` | `ENCENDER dispositivo99` |
 | `SEMANTICO` | `SEM_OPERACION_INCOMPATIBLE` | `ENCENDER alarma1` |
 | `SEMANTICO` | `SEM_ESTADO_INCOMPATIBLE` | `SI led1 == ACTIVADA ENTONCES APAGAR led1` |
 | `SEMANTICO` | `SEM_CORREO_INVALIDO` | `ENVIAR CORREO A "hola" MENSAJE "x"` |
 | `EJECUCION` | `EXE_ERROR_SMTP` | Mailpit no disponible |
+
+### Historial
+
+`GET /api/history` devuelve `{ "historial": [ ... ] }`, del más reciente al más antiguo.
+
+**Decisión de diseño:** el historial guarda **un registro por instrucción del programa original** (la que escribió el usuario), con su resultado. **No** guarda un evento por cada `SET_STATE` del IR. Por eso los cambios intermedios de estado no son observables y la optimización de asignaciones sobrescritas conserva el comportamiento visible. Esta decisión se justifica también en la documentación de optimizaciones.
+
+```json
+{
+  "id": 12,
+  "fecha": "2026-11-24T18:30:00Z",
+  "linea": 1,
+  "instruccion": "ENCENDER led1",
+  "exito": true,
+  "mensaje": "led1 ahora está ENCENDIDO"
+}
+```
 
 ### Decisiones de comportamiento
 
@@ -323,6 +360,7 @@ Cada integrante marca su aprobación con una revisión **Approve** en el Pull Re
 
 | Integrante | Usuario GitHub | Aprobado | Fecha |
 |---|---|---|---|
+| | | [ ] | |
 | | | [ ] | |
 | | | [ ] | |
 | | | [ ] | |
